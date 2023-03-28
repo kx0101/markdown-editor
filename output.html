@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.1.3/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script defer>
+const socket = io.connect('http://localhost:8080');
+socket.on('reload', function() { location.reload(); });
+</script>
+</head>
+<body>
+<h3>Hi</h3>
+<h2>test</h2>
+<p><code>code</code></p>
+<pre><code class="language-javascript">function test() {
+    console.log('omg it works');
+}
+</code></pre>
+<p>Hello <strong>Liako</strong></p>
+
+</body>
+</html>
