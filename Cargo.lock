@@ -1431,6 +1431,7 @@ dependencies = [
  "pulldown-cmark",
  "reqwest",
  "rust_socketio",
+ "serde_json",
  "tide",
  "tide-websockets",
  "tokio 0.3.7",
