@@ -12,3 +12,7 @@ tide = "0.16.0"
 async-std = { version = "1.12.0", features = ["attributes"] }
 reqwest = "0.11.16"
 tide-websockets = "0.4.0"
+tokio = { version = "0.3.4", features = ["full"] }
+env_logger = "0.10.0"
+futures-util = "0.3.27"
+rust_socketio = "0.4.1"
