@@ -1,7 +1,5 @@
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use pulldown_cmark::{html, Options, Parser};
-use rust_socketio::ClientBuilder;
-use serde_json::json;
 use std::fs::{self, File};
 use std::io::{Result, Write};
 use std::path::Path;
@@ -14,15 +12,17 @@ fn read_md_file(file_path: &Path) -> Result<String> {
     return Ok(md);
 }
 
+//  <meta http-equiv=\"refresh\" content=\"1\">\n\
 fn write_html_file(file_path: &Path, html: &str) -> Result<()> {
     let mut file = File::create(file_path)?;
     let html_with_meta = format!(
         "<!DOCTYPE html>\n<html>\n<head>\n\
         <meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\">\n\
+        <meta http-equiv=\"refresh\" content=\"1\">\n\
         <script src=\"https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.1.3/socket.io.js\"></script>\n\
         <script src=\"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js\"></script>\n\
         <script defer>\n\
-            const socket = io.connect('http://localhost:4000');\n\
+            const socket = io.connect('http://localhost:4000/socket.io');\n\
             socket.on('reload', function() {{ location.reload(); }});\n\
         </script>\n\
         </head>\n\
@@ -67,39 +67,35 @@ async fn main() -> tide::Result<()> {
         res.insert_header("Connection", "keep-alive");
         res.set_body("reload\n");
 
-        return Ok(res);
+        Ok(res)
     });
 
     let (tx, rx) = channel();
 
-    let mut input_watcher: RecommendedWatcher =
-        Watcher::new(tx.clone(), notify::Config::default()).unwrap();
-    input_watcher.watch(input_file_path, RecursiveMode::NonRecursive)?;
+    tokio::task::spawn_blocking(move || {
+        let mut input_watcher: RecommendedWatcher =
+            Watcher::new(tx.clone(), notify::Config::default()).unwrap();
+        input_watcher
+            .watch(input_file_path, RecursiveMode::NonRecursive)
+            .unwrap_or_else(|err| {
+                panic!("Failed to watch input file: {:?}", err);
+            });
 
-    let mut output_watcher: RecommendedWatcher =
-        Watcher::new(tx, notify::Config::default()).unwrap();
-    output_watcher.watch(output_file_path, RecursiveMode::NonRecursive)?;
+        let mut output_watcher: RecommendedWatcher =
+            Watcher::new(tx, notify::Config::default()).unwrap();
+        output_watcher
+            .watch(output_file_path, RecursiveMode::NonRecursive)
+            .unwrap_or_else(|err| {
+                panic!("Failed to watch output file: {:?}", err);
+            });
 
-    tokio::spawn(async move {
         loop {
             match rx.recv() {
-                Ok(_) => {
-                    markdown_to_html(input_file_path, output_file_path);
-
-                    let socket = ClientBuilder::new("http://localhost:4000").connect();
-
-                    match socket {
-                        Ok(socket) => {
-                            socket
-                                .emit("reload", json!({}))
-                                .expect("Failed to emit reload event");
-                        }
-                        Err(err) => {
-                            eprintln!("Failed to connect to server: {}", err);
-                        }
-                    };
+                Ok(_) => markdown_to_html(input_file_path, output_file_path),
+                Err(err) => {
+                    println!("watch error: {:?}", err);
+                    break;
                 }
-                Err(err) => println!("watch error: {:?}", err),
             };
         }
     });
