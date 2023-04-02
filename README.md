@@ -8,9 +8,8 @@ Markdown Editor is a simple web-based editor built with Rust, Actix-Web, and pul
 ## How to Use
 
 1. Clone this repository to your local machine.
-2. Open your preferred IDE or text editor and navigate to the cloned repository.
-3. Open the Markdown file that you want to edit.
-4. In your terminal, navigate to the root directory of the cloned repository and run the command `cargo run <file.md>` where `<file.md>` is the name of the Markdown file you want to edit.
+2. Open your preferred IDE or text editor and open the Markdown file that you want to edit.
+3. In your terminal, navigate to the root directory of the cloned repository and run the command `cargo run <file.md>` where `<file.md>` is the name of the Markdown file you want to edit.
 
 ## What's happening exactly
 
