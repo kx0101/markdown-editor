@@ -1,8 +1,8 @@
+use actix_web::{web, App, HttpResponse, HttpServer};
+use log::{error, info};
+use pulldown_cmark::{html, Options, Parser};
 use std::fs;
 use std::sync::{Arc, Mutex};
-
-use actix_web::{web, App, HttpResponse, HttpServer};
-use pulldown_cmark::{html, Options, Parser};
 
 #[derive(Clone)]
 struct AppState {
@@ -52,7 +52,7 @@ async fn index(state: web::Data<AppState>) -> HttpResponse {
 
 async fn update(state: web::Data<AppState>, markdown: web::Bytes) -> HttpResponse {
     if let Err(err) = fs::write("document.md", &markdown) {
-        eprintln!("Error writing to file: {}", err);
+        error!("Error writing to file: {}", err);
         return HttpResponse::InternalServerError().body(format!("Error writing to file: {}", err));
     }
 
@@ -63,7 +63,7 @@ async fn update(state: web::Data<AppState>, markdown: web::Bytes) -> HttpRespons
             HttpResponse::Ok().finish()
         }
         Err(err) => {
-            eprintln!("Error converting bytes to string: {}", err);
+            error!("Error converting bytes to string: {}", err);
             HttpResponse::InternalServerError()
                 .body(format!("Error converting bytes to string: {}", err))
         }
@@ -82,7 +82,7 @@ async fn get_markdown() -> HttpResponse {
     match fs::read_to_string(file_name) {
         Ok(markdown) => HttpResponse::Ok().body(markdown),
         Err(err) => {
-            eprintln!("Error reading markdown file: {}", err);
+            error!("Error reading markdown file: {}", err);
             HttpResponse::InternalServerError()
                 .body(format!("Error reading markdown file: {}", err))
         }
@@ -104,6 +104,7 @@ fn markdown_to_html(markdown: &str) -> String {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
+    let addr = "127.0.0.1:8080";
 
     let args: Vec<String> = std::env::args().collect();
     let file_name = args.get(1).expect("You did not provide a markdown file.");
@@ -111,7 +112,7 @@ async fn main() -> std::io::Result<()> {
     let initial_markdown = match fs::read_to_string(file_name) {
         Ok(markdown) => markdown,
         Err(err) => {
-            eprintln!("Error reading initial markdown file: {}", err);
+            error!("Error reading initial markdown file: {}", err);
             "".to_string()
         }
     };
@@ -130,5 +131,12 @@ async fn main() -> std::io::Result<()> {
             .default_service(web::route().to(index))
     });
 
-    server.bind("127.0.0.1:8080")?.run().await
+    info!("Server started at {}", addr);
+
+    let url = format!("http://{}", addr);
+    webbrowser::open(&url).expect("Failed to open browser.");
+
+    server.bind(addr)?.run().await?;
+
+    return Ok(());
 }
