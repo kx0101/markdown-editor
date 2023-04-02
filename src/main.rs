@@ -1,106 +1,134 @@
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::fs;
+use std::sync::{Arc, Mutex};
+
+use actix_web::{web, App, HttpResponse, HttpServer};
 use pulldown_cmark::{html, Options, Parser};
-use std::fs::{self, File};
-use std::io::{Result, Write};
-use std::path::Path;
-use std::sync::mpsc::channel;
-use tide::{Body, Request};
 
-fn read_md_file(file_path: &Path) -> Result<String> {
-    let md = fs::read_to_string(file_path.to_str().unwrap())?;
-
-    return Ok(md);
+#[derive(Clone)]
+struct AppState {
+    markdown: Arc<Mutex<String>>,
 }
 
-//  <meta http-equiv=\"refresh\" content=\"1\">\n\
-fn write_html_file(file_path: &Path, html: &str) -> Result<()> {
-    let mut file = File::create(file_path)?;
-    let html_with_meta = format!(
-        "<!DOCTYPE html>\n<html>\n<head>\n\
-        <meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\">\n\
-        <meta http-equiv=\"refresh\" content=\"1\">\n\
-        <script src=\"https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.1.3/socket.io.js\"></script>\n\
-        <script src=\"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js\"></script>\n\
-        <script defer>\n\
-            const socket = io.connect('http://localhost:4000/socket.io');\n\
-            socket.on('reload', function() {{ location.reload(); }});\n\
-        </script>\n\
-        </head>\n\
-        <body>\n{}\n</body>\n</html>",
+async fn index(state: web::Data<AppState>) -> HttpResponse {
+    let markdown = state.markdown.lock().unwrap().clone();
+    let html = markdown_to_html(&markdown);
+    let template = format!(
+        r#"
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Markdown Editor</title>
+            <script>
+                function markdownToHtml(markdown) {{
+                    return fetch("/render", {{
+                        method: "POST",
+                        body: markdown
+                    }}).then(response => response.text());
+                }}
+                setInterval(() => {{
+                    fetch("/markdown").then(response => {{
+                        if (response.ok) {{
+                            response.text().then(markdown => {{
+                                markdownToHtml(markdown).then(html => {{
+                                    document.getElementById("preview").innerHTML = html;
+                                }});
+                            }});
+                        }}
+                    }});
+                }}, 1000);
+            </script>
+        </head>
+        <body>
+            <div id="preview">{}</div>
+        </body>
+        </html>
+    "#,
         html
     );
 
-    write!(file, "{}", html_with_meta)?;
-    file.sync_all()?;
-
-    return Ok(());
+    return HttpResponse::Ok().content_type("text/html").body(template);
 }
 
-fn markdown_to_html(input_path: &Path, output_path: &Path) {
-    let markdown_input = read_md_file(input_path).unwrap();
+async fn update(state: web::Data<AppState>, markdown: web::Bytes) -> HttpResponse {
+    if let Err(err) = fs::write("document.md", &markdown) {
+        eprintln!("Error writing to file: {}", err);
+        return HttpResponse::InternalServerError().body(format!("Error writing to file: {}", err));
+    }
 
+    let mut locked_markdown = state.markdown.lock().unwrap();
+    match std::str::from_utf8(&markdown) {
+        Ok(utf8_string) => {
+            *locked_markdown = utf8_string.to_string();
+            HttpResponse::Ok().finish()
+        }
+        Err(err) => {
+            eprintln!("Error converting bytes to string: {}", err);
+            HttpResponse::InternalServerError()
+                .body(format!("Error converting bytes to string: {}", err))
+        }
+    }
+}
+
+async fn render(markdown: web::Bytes) -> HttpResponse {
+    let html = markdown_to_html(&String::from_utf8_lossy(&markdown).into_owned());
+
+    return HttpResponse::Ok().body(html);
+}
+
+async fn get_markdown() -> HttpResponse {
+    let file_name = std::env::args().nth(1).unwrap_or("document.md".to_string());
+
+    match fs::read_to_string(file_name) {
+        Ok(markdown) => HttpResponse::Ok().body(markdown),
+        Err(err) => {
+            eprintln!("Error reading markdown file: {}", err);
+            HttpResponse::InternalServerError()
+                .body(format!("Error reading markdown file: {}", err))
+        }
+    }
+}
+
+fn markdown_to_html(markdown: &str) -> String {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
-    let parser = Parser::new_ext(&markdown_input, options);
 
+    let parser = Parser::new_ext(markdown, options);
     let mut html_output = String::new();
+
     html::push_html(&mut html_output, parser);
 
-    write_html_file(output_path, &html_output).unwrap();
+    return html_output;
 }
 
-#[tokio::main]
-async fn main() -> tide::Result<()> {
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
     env_logger::init();
-    std::env::set_var("RUST_BACKTRACE", "1");
-    let mut app = tide::new();
 
-    let input_file_path = Path::new("input.md");
-    let output_file_path = Path::new("output.html");
+    let args: Vec<String> = std::env::args().collect();
+    let file_name = args.get(1).expect("You did not provide a markdown file.");
 
-    app.at("/")
-        .get(|_| async { Ok(Body::from_file("output.html").await?) });
-
-    app.at("/socket.io/").get(|_req: Request<()>| async move {
-        let mut res = tide::http::Response::new(200);
-
-        res.insert_header("Connection", "keep-alive");
-        res.set_body("reload\n");
-
-        Ok(res)
-    });
-
-    let (tx, rx) = channel();
-
-    tokio::task::spawn_blocking(move || {
-        let mut input_watcher: RecommendedWatcher =
-            Watcher::new(tx.clone(), notify::Config::default()).unwrap();
-        input_watcher
-            .watch(input_file_path, RecursiveMode::NonRecursive)
-            .unwrap_or_else(|err| {
-                panic!("Failed to watch input file: {:?}", err);
-            });
-
-        let mut output_watcher: RecommendedWatcher =
-            Watcher::new(tx, notify::Config::default()).unwrap();
-        output_watcher
-            .watch(output_file_path, RecursiveMode::NonRecursive)
-            .unwrap_or_else(|err| {
-                panic!("Failed to watch output file: {:?}", err);
-            });
-
-        loop {
-            match rx.recv() {
-                Ok(_) => markdown_to_html(input_file_path, output_file_path),
-                Err(err) => {
-                    println!("watch error: {:?}", err);
-                    break;
-                }
-            };
+    let initial_markdown = match fs::read_to_string(file_name) {
+        Ok(markdown) => markdown,
+        Err(err) => {
+            eprintln!("Error reading initial markdown file: {}", err);
+            "".to_string()
         }
+    };
+
+    let state = AppState {
+        markdown: Arc::new(Mutex::new(initial_markdown)),
+    };
+
+    let server = HttpServer::new(move || {
+        App::new()
+            .data(state.clone())
+            .service(web::resource("/").to(index))
+            .service(web::resource("/markdown").to(get_markdown))
+            .service(web::resource("/update").to(update))
+            .service(web::resource("/render").to(render))
+            .default_service(web::route().to(index))
     });
 
-    app.listen("localhost:4000").await?;
-
-    return Ok(());
+    server.bind("127.0.0.1:8080")?.run().await
 }
