@@ -1,4 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::web::Data;
 use log::{error, info};
 use pulldown_cmark::{html, Options, Parser};
 use std::fs;
@@ -123,7 +124,7 @@ async fn main() -> std::io::Result<()> {
 
     let server = HttpServer::new(move || {
         App::new()
-            .data(state.clone())
+            .app_data(Data::new(state.clone()))
             .service(web::resource("/").to(index))
             .service(web::resource("/markdown").to(get_markdown))
             .service(web::resource("/update").to(update))
